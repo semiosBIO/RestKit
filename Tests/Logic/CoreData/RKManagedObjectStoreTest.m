@@ -31,7 +31,7 @@
 - (void)testInstantiationOfNewManagedObjectContextAssociatesWithObjectStore
 {
     RKManagedObjectStore *store = [RKTestFactory managedObjectStore];
-    NSManagedObjectContext *context = [store newManagedObjectContext];
+    NSManagedObjectContext *context = [store newMainManagedObjectContext];
     assertThat([context managedObjectStore], is(equalTo(store)));
 }
 

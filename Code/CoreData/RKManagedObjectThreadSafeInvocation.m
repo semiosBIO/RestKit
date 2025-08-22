@@ -76,7 +76,7 @@
         id value = [argument valueForKeyPath:keyPath];
         if ([value isKindOfClass:[NSManagedObjectID class]]) {
             NSAssert(self.objectStore, @"Object store cannot be nil");
-            NSManagedObject* managedObject = [self.objectStore objectWithID:(NSManagedObjectID*)value];
+            NSManagedObject* managedObject = [[self.objectStore primaryManagedObjectContext] objectWithID:(NSManagedObjectID*)value];
             NSAssert(managedObject, @"Expected managed object for ID %@, got nil", value);
             [self setValue:managedObject forKeyPathOrKey:keyPath object:argument];
         } else if ([value respondsToSelector:@selector(allObjects)]) {
@@ -84,7 +84,7 @@
             for (id subObject in value) {
                 if ([subObject isKindOfClass:[NSManagedObjectID class]]) {
                     NSAssert(self.objectStore, @"Object store cannot be nil");
-                    NSManagedObject* managedObject = [self.objectStore objectWithID:(NSManagedObjectID*)subObject];
+                    NSManagedObject* managedObject = [[self.objectStore primaryManagedObjectContext] objectWithID:(NSManagedObjectID*)subObject];
                     [collection addObject:managedObject];
                 } else {
                     [collection addObject:subObject];

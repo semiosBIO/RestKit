@@ -101,29 +101,31 @@
 
 - (void)load
 {
-    RKLogDebug(@"Loading entity cache for Entity '%@' by attribute '%@'", self.entity.name, self.attribute);
-    NSFetchRequest *fetchRequest = [[NSFetchRequest alloc] init];
-    [fetchRequest setEntity:self.entity];
-    [fetchRequest setResultType:NSManagedObjectIDResultType];
-
-    NSError *error = nil;
-    NSArray *objectIDs = [self.managedObjectContext executeFetchRequest:fetchRequest error:&error];
-    [fetchRequest release];
-    if (error) {
-        RKLogError(@"Failed to load entity cache: %@", error);
-        return;
-    }
-
-    self.attributeValuesToObjectIDs = [NSMutableDictionary dictionaryWithCapacity:[objectIDs count]];
-    for (NSManagedObjectID *objectID in objectIDs) {
+    [self.managedObjectContext performBlockAndWait:^{
+        RKLogDebug(@"Loading entity cache for Entity '%@' by attribute '%@'", self.entity.name, self.attribute);
+        NSFetchRequest *fetchRequest = [[NSFetchRequest alloc] init];
+        [fetchRequest setEntity:self.entity];
+        [fetchRequest setResultType:NSManagedObjectIDResultType];
+        
         NSError *error = nil;
-        NSManagedObject *object = [self.managedObjectContext existingObjectWithID:objectID error:&error];
-        if (! object && error) {
-            RKLogError(@"Failed to retrieve managed object with ID %@: %@", objectID, error);
+        NSArray *objectIDs = [self.managedObjectContext executeFetchRequest:fetchRequest error:&error];
+        [fetchRequest release];
+        if (error) {
+            RKLogError(@"Failed to load entity cache: %@", error);
+            return;
         }
-
-        [self addObject:object];
-    }
+        
+        self.attributeValuesToObjectIDs = [NSMutableDictionary dictionaryWithCapacity:[objectIDs count]];
+        for (NSManagedObjectID *objectID in objectIDs) {
+            NSError *error = nil;
+            NSManagedObject *object = [self.managedObjectContext existingObjectWithID:objectID error:&error];
+            if (! object && error) {
+                RKLogError(@"Failed to retrieve managed object with ID %@: %@", objectID, error);
+            }
+            
+            [self addObject:object];
+        }
+    }];
 }
 
 - (void)flush

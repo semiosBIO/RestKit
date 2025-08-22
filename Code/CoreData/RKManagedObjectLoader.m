@@ -88,7 +88,7 @@
 // Overload the target object reader to return a thread-local copy of the target object
 - (id)targetObject {
     if ([NSThread isMainThread] == NO && _targetObjectID) {
-        return [self.objectStore objectWithID:_targetObjectID];
+        return [[self.objectStore backgroundManagedObjectContext] objectWithID:_targetObjectID];
     }
 
     return _targetObject;
@@ -113,7 +113,8 @@
     // set before the managed object store.
     if (self.targetObject && [self.targetObject isKindOfClass:[NSManagedObject class]]) {
         _deleteObjectOnFailure = [(NSManagedObject*)self.targetObject isNew];
-        [self.objectStore save:nil];
+        NSManagedObjectContext* context = [(NSManagedObject*)self.targetObject managedObjectContext];
+        [self.objectStore saveContext:context withError:nil];
         _targetObjectID = [[(NSManagedObject*)self.targetObject objectID] retain];
     }
 
@@ -141,7 +142,7 @@
         for (id object in cachedObjects) {
             if (NO == [results containsObject:object]) {
                 RKLogTrace(@"Deleting orphaned object %@: not found in result set and expected at this resource path", object);
-                [[self.objectStore managedObjectContextForCurrentThread] deleteObject:object];
+                [[self.objectStore backgroundManagedObjectContext] deleteObject:object];
             }
         }
     } else {
@@ -155,14 +156,14 @@
     if (_targetObjectID && self.targetObject && self.method == RKRequestMethodDELETE) {
         NSManagedObject* backgroundThreadObject = [self.objectStore objectWithID:_targetObjectID];
         RKLogInfo(@"Deleting local object %@ due to DELETE request", backgroundThreadObject);
-        [[self.objectStore managedObjectContextForCurrentThread] deleteObject:backgroundThreadObject];
+        [[self.objectStore backgroundManagedObjectContext] deleteObject:backgroundThreadObject];
     }
 
     // If the response was successful, save the store...
     if ([self.response isSuccessful]) {
         [self deleteCachedObjectsMissingFromResult:result];
         NSError *error = nil;
-        BOOL success = [self.objectStore save:&error];
+        BOOL success = [self.objectStore saveContext:[self.objectStore backgroundManagedObjectContext] withError:&error];
         if (! success) {
             RKLogError(@"Failed to save managed object context after mapping completed: %@", [error localizedDescription]);
             NSMethodSignature* signature = [(NSObject *)self methodSignatureForSelector:@selector(informDelegateOfError:)];
@@ -170,11 +171,9 @@
             [invocation setTarget:self];
             [invocation setSelector:@selector(informDelegateOfError:)];
             [invocation setArgument:&error atIndex:2];
-            [invocation invokeOnMainThread];
+            [invocation invoke];
 
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [self finalizeLoad:success];
-            });
+            [self finalizeLoad:success];
             return;
         }
     }
@@ -187,7 +186,7 @@
     [invocation setSelector:@selector(informDelegateOfObjectLoadWithResultDictionary:)];
     [invocation setArgument:&dictionary atIndex:2];
     [invocation setManagedObjectKeyPaths:_managedObjectKeyPaths forArgument:2];
-    [invocation invokeOnMainThread];
+    [invocation invoke];
 }
 
 // Overloaded to handle deleting an object orphaned by a failed postObject:
@@ -199,7 +198,7 @@
             RKLogInfo(@"Error response encountered: Deleting existing managed object with ID: %@", _targetObjectID);
             NSManagedObject* objectToDelete = [self.objectStore objectWithID:_targetObjectID];
             if (objectToDelete) {
-                [[self.objectStore managedObjectContextForCurrentThread] deleteObject:objectToDelete];
+                [[self.objectStore backgroundManagedObjectContext] deleteObject:objectToDelete];
                 [self.objectStore save:nil];
             } else {
                 RKLogWarning(@"Unable to delete existing managed object with ID: %@. Object not found in the store.", _targetObjectID);

@@ -131,7 +131,7 @@
     [invocation setSelector:@selector(informDelegateWithDictionary:)];
     [invocation setArgument:&_dictionary atIndex:2]; // NOTE: _cmd and self are 0 and 1
     [invocation setManagedObjectKeyPaths:[NSSet setWithObject:@"humans"] forArgument:2];
-    [invocation invokeOnMainThread];
+    [invocation invoke];
 
     [pool drain];
 }

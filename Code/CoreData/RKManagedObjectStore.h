@@ -51,7 +51,7 @@ extern NSString* const RKManagedObjectStoreDidFailSaveNotification;
     NSString* _storeFilename;
     NSString* _pathToStoreFile;
     NSManagedObjectModel* _managedObjectModel;
-    NSPersistentStoreCoordinator* _persistentStoreCoordinator;
+    NSPersistentContainer* _persistentContainer;
 }
 
 // The delegate for this object store
@@ -65,7 +65,7 @@ extern NSString* const RKManagedObjectStoreDidFailSaveNotification;
 
 // Core Data
 @property (nonatomic, readonly) NSManagedObjectModel* managedObjectModel;
-@property (nonatomic, readonly) NSPersistentStoreCoordinator* persistentStoreCoordinator;
+@property (nonatomic, readonly) NSPersistentContainer* persistentContainer;
 
 ///-----------------------------------------------------------------------------
 /// @name Accessing the Default Object Store
@@ -133,25 +133,7 @@ extern NSString* const RKManagedObjectStoreDidFailSaveNotification;
 /**
  * Save the current contents of the managed object store
  */
-- (BOOL)save:(NSError **)error;
-
-/**
- * This deletes and recreates the managed object context and
- * persistent store, effectively clearing all data
- */
-- (void)deletePersistentStoreUsingSeedDatabaseName:(NSString *)seedFile;
-- (void)deletePersistentStore;
-
-/**
- * Retrieves a model object from the appropriate context using the objectId
- */
-- (NSManagedObject*)objectWithID:(NSManagedObjectID*)objectID;
-
-/**
- * Retrieves a array of model objects from the appropriate context using
- * an array of NSManagedObjectIDs
- */
-- (NSArray*)objectsWithIDs:(NSArray*)objectIDs;
+- (BOOL)saveContext:(NSManagedObjectContext*)context withError:(NSError **)error;
 
 ///-----------------------------------------------------------------------------
 /// @name Retrieving Managed Object Contexts
@@ -162,17 +144,6 @@ extern NSString* const RKManagedObjectStoreDidFailSaveNotification;
  the object store was created.
  */
 @property (nonatomic, retain, readonly) NSManagedObjectContext *primaryManagedObjectContext;
-
-/**
- Instantiates a new managed object context
- */
-- (NSManagedObjectContext *)newManagedObjectContext;
-
-/*
- * This returns an appropriate managed object context for this object store.
- * Because of the intrecacies of how Core Data works across threads it returns
- * a different NSManagedObjectContext for each thread.
- */
-- (NSManagedObjectContext *)managedObjectContextForCurrentThread;
+@property (nonatomic, retain, readonly) NSManagedObjectContext *backgroundManagedObjectContext;
 
 @end

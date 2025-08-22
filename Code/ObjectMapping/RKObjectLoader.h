@@ -138,7 +138,6 @@ typedef void(^RKObjectLoaderDidLoadObjectsDictionaryBlock)(NSDictionary *diction
 @interface RKObjectLoader : RKRequest {
     id _sourceObject;
     id _targetObject;
-    dispatch_queue_t _mappingQueue;
 }
 
 /**
@@ -250,13 +249,6 @@ typedef void(^RKObjectLoaderDidLoadObjectsDictionaryBlock)(NSDictionary *diction
  * be used to update the targetObject's attributes and relationships.
  */
 @property (nonatomic, retain) NSObject *targetObject;
-
-/**
- The Grand Central Dispatch queue to perform our parsing and object mapping
- within. By default, object loaders will use the mappingQueue from the RKObjectManager
- that created the loader. You can override this on a per-loader basis as necessary.
- */
-@property (nonatomic, assign) dispatch_queue_t mappingQueue;
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 

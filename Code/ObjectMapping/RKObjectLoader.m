@@ -27,6 +27,7 @@
 #import "RKRequest_Internals.h"
 #import "RKObjectMappingProvider+Contexts.h"
 #import "RKObjectSerializer.h"
+#import "NSManagedObject+ActiveRecord.h"
 
 // Set Logging Component
 #undef RKLogComponent
@@ -52,7 +53,6 @@
 @synthesize serializationMapping = _serializationMapping;
 @synthesize serializationMIMEType = _serializationMIMEType;
 @synthesize sourceObject = _sourceObject;
-@synthesize mappingQueue = _mappingQueue;
 @synthesize onDidFailWithError = _onDidFailWithError;
 @synthesize onDidLoadObject = _onDidLoadObject;
 @synthesize onDidLoadObjects = _onDidLoadObjects;
@@ -69,7 +69,6 @@
     self = [super initWithURL:URL];
     if (self) {
         _mappingProvider = [mappingProvider retain];
-        _mappingQueue = [RKObjectManager defaultMappingQueue];
     }
 
     return self;
@@ -125,17 +124,13 @@
     self.loaded = successful;
     
     if ([self.delegate respondsToSelector:@selector(objectLoaderDidFinishLoading:)]) {
-        [(NSObject<RKObjectLoaderDelegate>*)self.delegate performSelectorOnMainThread:@selector(objectLoaderDidFinishLoading:)
-                                                                           withObject:self waitUntilDone:YES];
+        [self.delegate objectLoaderDidFinishLoading:self];
     }
-
     [[NSNotificationCenter defaultCenter] postNotificationName:RKRequestDidFinishLoadingNotification object:self];
 }
 
 // Invoked on the main thread. Inform the delegate.
 - (void)informDelegateOfObjectLoadWithResultDictionary:(NSDictionary*)resultDictionary {
-    NSAssert([NSThread isMainThread], @"RKObjectLoaderDelegate callbacks must occur on the main thread");
-
     RKObjectMappingResult* result = [RKObjectMappingResult mappingResultWithDictionary:resultDictionary];
 
     // Dictionary callback
@@ -261,11 +256,11 @@
 }
 
 - (void)performMappingInDispatchQueue {
-    NSAssert(self.mappingQueue, @"mappingQueue cannot be nil");
-    dispatch_async(self.mappingQueue, ^{
+    NSManagedObjectContext* context = [NSManagedObjectContext contextForBackgroundThread];
+    [context performBlock:^{
         NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
 
-        RKLogDebug(@"Beginning object mapping activities within GCD queue labeled: %s", dispatch_queue_get_label(self.mappingQueue));
+        RKLogDebug(@"Beginning object mapping activities within GCD queue labeled: %@", context);
         NSError *error = nil;
         _result = [[self performMapping:&error] retain];
         NSAssert(_result || error, @"Expected performMapping to return a mapping result or an error.");
@@ -276,7 +271,7 @@
         }
 
         [pool drain];
-    });
+    }];
 }
 
 - (BOOL)canParseMIMEType:(NSString*)MIMEType {
@@ -420,60 +415,49 @@
 
 // NOTE: We do NOT call super here. We are overloading the default behavior from RKRequest
 - (void)didFinishLoad:(RKResponse*)response {
-    NSAssert([NSThread isMainThread], @"RKObjectLoaderDelegate callbacks must occur on the main thread");
-    self.response = response;
+    [[NSManagedObjectContext contextForBackgroundThread] performBlock:^{
+        self.response = response;
 
-    if ((_cachePolicy & RKRequestCachePolicyEtag) && [response isNotModified]) {
-        self.response = [self.cache responseForRequest:self];
-        NSAssert(self.response, @"Unexpectedly loaded nil response from cache");
-        [self updateInternalCacheDate];
-    }
-
-    if (![self.response wasLoadedFromCache] && [self.response isSuccessful] && (_cachePolicy != RKRequestCachePolicyNone)) {
-        [self.cache storeResponse:self.response forRequest:self];
-    }
-
-    if ([_delegate respondsToSelector:@selector(request:didLoadResponse:)]) {
-        [_delegate request:self didLoadResponse:self.response];
-    }
-
-    if (self.onDidLoadResponse) {
-        self.onDidLoadResponse(self.response);
-    }
-
-    // Post the notification
-    NSDictionary* userInfo = [NSDictionary dictionaryWithObject:self.response
-                                                         forKey:RKRequestDidLoadResponseNotificationUserInfoResponseKey];
-    [[NSNotificationCenter defaultCenter] postNotificationName:RKRequestDidLoadResponseNotification
-                                                        object:self
-                                                      userInfo:userInfo];
-
-    if ([self isResponseMappable]) {
-        // Determine if we are synchronous here or not.
-        if (_sentSynchronously) {
-            NSError* error = nil;
-            _result = [[self performMapping:&error] retain];
-            if (self.result) {
-                [self processMappingResult:self.result];
-            } else {
-                [self performSelectorInBackground:@selector(didFailLoadWithError:) withObject:error];
-            }
-        } else {
-            [self performMappingInDispatchQueue];
+        if ((_cachePolicy & RKRequestCachePolicyEtag) && [response isNotModified]) {
+            self.response = [self.cache responseForRequest:self];
+            NSAssert(self.response, @"Unexpectedly loaded nil response from cache");
+            [self updateInternalCacheDate];
         }
-    }
-}
 
-- (void)setMappingQueue:(dispatch_queue_t)newMappingQueue {
-    if (_mappingQueue) {
-        dispatch_release(_mappingQueue);
-        _mappingQueue = nil;
-    }
+        if (![self.response wasLoadedFromCache] && [self.response isSuccessful] && (_cachePolicy != RKRequestCachePolicyNone)) {
+            [self.cache storeResponse:self.response forRequest:self];
+        }
 
-    if (newMappingQueue) {
-        dispatch_retain(newMappingQueue);
-        _mappingQueue = newMappingQueue;
-    }
+        if ([_delegate respondsToSelector:@selector(request:didLoadResponse:)]) {
+            [_delegate request:self didLoadResponse:self.response];
+        }
+
+        if (self.onDidLoadResponse) {
+            self.onDidLoadResponse(self.response);
+        }
+
+        // Post the notification
+        NSDictionary* userInfo = [NSDictionary dictionaryWithObject:self.response
+                                                             forKey:RKRequestDidLoadResponseNotificationUserInfoResponseKey];
+        [[NSNotificationCenter defaultCenter] postNotificationName:RKRequestDidLoadResponseNotification
+                                                            object:self
+                                                          userInfo:userInfo];
+
+        if ([self isResponseMappable]) {
+            // Determine if we are synchronous here or not.
+            if (_sentSynchronously) {
+                NSError* error = nil;
+                _result = [[self performMapping:&error] retain];
+                if (self.result) {
+                    [self processMappingResult:self.result];
+                } else {
+                    [self performSelectorInBackground:@selector(didFailLoadWithError:) withObject:error];
+                }
+            } else {
+                [self performMappingInDispatchQueue];
+            }
+        }
+    }];
 }
 
 // Proxy the delegate property back to our superclass implementation. The object loader should

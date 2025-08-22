@@ -24,6 +24,7 @@
 #import "RKManagedObjectLoader.h"
 #import "Support.h"
 #import "RKErrorMessage.h"
+#import "NSManagedObject+ActiveRecord.h"
 
 NSString* const RKObjectManagerDidBecomeOfflineNotification = @"RKDidEnterOfflineModeNotification";
 NSString* const RKObjectManagerDidBecomeOnlineNotification = @"RKDidEnterOnlineModeNotification";

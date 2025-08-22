@@ -164,7 +164,8 @@ NSString* const RKDefaultSeedDatabaseFileName = @"RKSeedDatabase.sqlite";
 
 - (void)finalizeSeedingAndExit {
     NSError *error = nil;
-    BOOL success = [[_manager objectStore] save:&error];
+    RKManagedObjectStore* objectStore = [_manager objectStore];
+    BOOL success = [objectStore saveContext:objectStore.primaryManagedObjectContext withError:&error];
     if (! success) {
         RKLogError(@"[RestKit] RKManagedObjectSeeder: Error saving object context: %@", [error localizedDescription]);
     }

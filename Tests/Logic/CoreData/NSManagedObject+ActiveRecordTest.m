@@ -33,7 +33,7 @@
 - (void)testFindByPrimaryKeyInContext
 {
     RKManagedObjectStore *store = [RKTestFactory managedObjectStore];
-    NSManagedObjectContext *context = [[RKTestFactory managedObjectStore] newManagedObjectContext];
+    NSManagedObjectContext *context = [[RKTestFactory managedObjectStore] newMainManagedObjectContext];
     NSEntityDescription *entity = [RKHuman entityDescription];
     entity.primaryKeyAttributeName = @"railsID";
 
