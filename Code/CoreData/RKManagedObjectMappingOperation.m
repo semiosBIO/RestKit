@@ -106,30 +106,25 @@
     NSDictionary* relationshipsAndPrimaryKeyAttributes = [(RKManagedObjectMapping *)self.objectMapping relationshipsAndPrimaryKeyAttributes];
     RKLogTrace(@"relationshipsAndPrimaryKeyAttributes: %@", relationshipsAndPrimaryKeyAttributes);
     for (NSString* relationshipName in relationshipsAndPrimaryKeyAttributes) {
-        if (self.queue) {
-            RKLogTrace(@"Enqueueing relationship connection using operation queue");
-            __block RKManagedObjectMappingOperation *selfRef = self;
-            [self.queue addOperationWithBlock:^{
-                [selfRef connectRelationship:relationshipName];
-            }];
-        } else {
-            [self connectRelationship:relationshipName];
-        }
+        [self connectRelationship:relationshipName];
     }
 }
 
 - (BOOL)performMapping:(NSError **)error {
-    BOOL success = [super performMapping:error];
-    if ([self.objectMapping isKindOfClass:[RKManagedObjectMapping class]]) {
-        /**
-         NOTE: Processing the pending changes here ensures that the managed object context generates observable
-         callbacks that are important for maintaining any sort of cache that is consistent within a single
-         object mapping operation. As the MOC is only saved when the aggregate operation is processed, we must
-         manually invoke processPendingChanges to prevent recreating objects with the same primary key.
-         See https://github.com/RestKit/RestKit/issues/661
-         */
-        [self connectRelationships];
-    }
+    __block BOOL success;
+    [[NSManagedObjectContext contextForBackgroundThread] performBlockAndWait:^{
+        success = [super performMapping:error];
+        if ([self.objectMapping isKindOfClass:[RKManagedObjectMapping class]]) {
+            /**
+             NOTE: Processing the pending changes here ensures that the managed object context generates observable
+             callbacks that are important for maintaining any sort of cache that is consistent within a single
+             object mapping operation. As the MOC is only saved when the aggregate operation is processed, we must
+             manually invoke processPendingChanges to prevent recreating objects with the same primary key.
+             See https://github.com/RestKit/RestKit/issues/661
+             */
+            [self connectRelationships];
+        }
+    }];
     return success;
 }
 

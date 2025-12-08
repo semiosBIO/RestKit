@@ -111,11 +111,13 @@
     // into an error where the object context cannot be saved. We do this
     // right before send to avoid sequencing issues where the target object is
     // set before the managed object store.
+    NSManagedObjectContext* context = [(NSManagedObject*)self.targetObject managedObjectContext];
     if (self.targetObject && [self.targetObject isKindOfClass:[NSManagedObject class]]) {
-        _deleteObjectOnFailure = [(NSManagedObject*)self.targetObject isNew];
-        NSManagedObjectContext* context = [(NSManagedObject*)self.targetObject managedObjectContext];
-        [self.objectStore saveContext:context withError:nil];
-        _targetObjectID = [[(NSManagedObject*)self.targetObject objectID] retain];
+        [context performBlockAndWait:^{
+            _deleteObjectOnFailure = [(NSManagedObject*)self.targetObject isNew];
+            [self.objectStore saveContext:context withError:nil];
+            _targetObjectID = [[(NSManagedObject*)self.targetObject objectID] retain];
+        }];
     }
 
     return [super prepareURLRequest];

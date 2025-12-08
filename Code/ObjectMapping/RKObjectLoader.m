@@ -108,11 +108,13 @@
 }
 
 - (void)informDelegateOfError:(NSError *)error {
-    [(NSObject<RKObjectLoaderDelegate>*)_delegate objectLoader:self didFailWithError:error];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [(NSObject<RKObjectLoaderDelegate>*)_delegate objectLoader:self didFailWithError:error];
 
-    if (self.onDidFailWithError) {
-        self.onDidFailWithError(error);
-    }
+        if (self.onDidFailWithError) {
+            self.onDidFailWithError(error);
+        }
+    });
 }
 
 #pragma mark - Response Processing
