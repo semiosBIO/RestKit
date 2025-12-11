@@ -113,11 +113,24 @@
     // set before the managed object store.
     NSManagedObjectContext* context = [(NSManagedObject*)self.targetObject managedObjectContext];
     if (self.targetObject && [self.targetObject isKindOfClass:[NSManagedObject class]]) {
-        [context performBlockAndWait:^{
-            _deleteObjectOnFailure = [(NSManagedObject*)self.targetObject isNew];
-            [self.objectStore saveContext:context withError:nil];
+        // With parent-child contexts, we cannot use performBlockAndWait on a child context
+        // from the main thread, as the child may need to access the parent (main queue),
+        // causing a deadlock. Use performBlock (async) for background contexts when on main thread.
+        if ([NSThread isMainThread] && context != self.objectStore.primaryManagedObjectContext) {
+            // We're on main thread trying to access background context - use async to avoid deadlock.
+            // Capture objectID now (objectID is thread-safe), do the rest async.
             _targetObjectID = [[(NSManagedObject*)self.targetObject objectID] retain];
-        }];
+            [context performBlock:^{
+                _deleteObjectOnFailure = [(NSManagedObject*)self.targetObject isNew];
+                [self.objectStore saveContext:context withError:nil];
+            }];
+        } else {
+            [context performBlockAndWait:^{
+                _deleteObjectOnFailure = [(NSManagedObject*)self.targetObject isNew];
+                [self.objectStore saveContext:context withError:nil];
+                _targetObjectID = [[(NSManagedObject*)self.targetObject objectID] retain];
+            }];
+        }
     }
 
     return [super prepareURLRequest];

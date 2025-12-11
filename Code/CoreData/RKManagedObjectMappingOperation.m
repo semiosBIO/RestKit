@@ -112,7 +112,16 @@
 
 - (BOOL)performMapping:(NSError **)error {
     __block BOOL success;
-    [[NSManagedObjectContext contextForBackgroundThread] performBlockAndWait:^{
+    NSManagedObjectContext *context = [NSManagedObjectContext contextForBackgroundThread];
+
+    // With parent-child contexts, we cannot use performBlockAndWait on child context
+    // from main thread as it may need to access parent (main queue), causing deadlock.
+    // If on main thread, use the main context instead; otherwise use background context.
+    if ([NSThread isMainThread]) {
+        context = [NSManagedObjectContext contextForMainThread];
+    }
+
+    [context performBlockAndWait:^{
         success = [super performMapping:error];
         if ([self.objectMapping isKindOfClass:[RKManagedObjectMapping class]]) {
             /**

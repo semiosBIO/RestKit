@@ -230,52 +230,33 @@ static RKManagedObjectStore *defaultObjectStore = nil;
             }
             success = NO;
         }
+
     }];
+
+    // If this context has a parent, cascade the save to persist to disk.
+    // We must dispatch to the parent's queue properly to avoid deadlocks.
+    NSManagedObjectContext *parentContext = context.parentContext;
+    if (parentContext != nil && success) {
+        // The parent is a main queue context. We need to save it on the main queue.
+        // Use dispatch_async to avoid deadlock when main thread is waiting for us.
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [parentContext performBlockAndWait:^{
+                NSError *parentError = nil;
+                if (![parentContext save:&parentError]) {
+                    if (self.delegate != nil && [self.delegate respondsToSelector:@selector(managedObjectStore:didFailToSaveContext:error:exception:)]) {
+                        [self.delegate managedObjectStore:self didFailToSaveContext:parentContext error:parentError exception:nil];
+                    }
+                    RKLogError(@"Core Data Parent Context Save Error: %@", [parentError localizedDescription]);
+                }
+            }];
+        });
+    }
 
     if (!success) {
         if (error) {
             *error = localError;
         }
         return NO;
-    }
-
-    // If this context has a parent, cascade the save to persist to disk
-    NSManagedObjectContext *parentContext = context.parentContext;
-    if (parentContext != nil) {
-        __block NSError *parentError = nil;
-        __block BOOL parentSuccess = YES;
-
-        [parentContext performBlockAndWait:^{
-            @try {
-                if (![parentContext save:&parentError]) {
-                    if (self.delegate != nil && [self.delegate respondsToSelector:@selector(managedObjectStore:didFailToSaveContext:error:exception:)]) {
-                        [self.delegate managedObjectStore:self didFailToSaveContext:parentContext error:parentError exception:nil];
-                    }
-
-                    NSDictionary* userInfo = [NSDictionary dictionaryWithObject:parentError forKey:@"error"];
-                    [[NSNotificationCenter defaultCenter] postNotificationName:RKManagedObjectStoreDidFailSaveNotification object:self userInfo:userInfo];
-
-                    RKLogError(@"Core Data Parent Context Save Error: %@", [parentError localizedDescription]);
-                    parentSuccess = NO;
-                }
-            }
-            @catch (NSException* e) {
-                if (self.delegate != nil && [self.delegate respondsToSelector:@selector(managedObjectStore:didFailToSaveContext:error:exception:)]) {
-                    [self.delegate managedObjectStore:self didFailToSaveContext:parentContext error:nil exception:e];
-                }
-                else {
-                    @throw;
-                }
-                parentSuccess = NO;
-            }
-        }];
-
-        if (!parentSuccess) {
-            if (error) {
-                *error = parentError;
-            }
-            return NO;
-        }
     }
 
     return YES;
