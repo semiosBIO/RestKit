@@ -73,8 +73,10 @@
             // Implemented for issue 284 - https://github.com/RestKit/RestKit/issues/284
             relatedObject = [NSMutableSet set];
             NSObject<RKManagedObjectCaching> *cache = [[(RKManagedObjectMapping*)[self objectMapping] objectStore] cacheStrategy];
+            // Use the destination object's context to avoid cross-context issues
+            NSManagedObjectContext *lookupContext = [self.destinationObject managedObjectContext];
             for (id foreignKey in valueOfLocalPrimaryKeyAttribute) {
-                id searchResult = [cache findInstanceOfEntity:objectMapping.entity withPrimaryKeyAttribute:primaryKeyAttributeOfRelatedObject value:foreignKey inManagedObjectContext:[[(RKManagedObjectMapping*)[self objectMapping] objectStore] backgroundManagedObjectContext]];
+                id searchResult = [cache findInstanceOfEntity:objectMapping.entity withPrimaryKeyAttribute:primaryKeyAttributeOfRelatedObject value:foreignKey inManagedObjectContext:lookupContext];
                 if (searchResult) {
                     [relatedObject addObject:searchResult];
                 }
@@ -112,28 +114,35 @@
 
 - (BOOL)performMapping:(NSError **)error {
     __block BOOL success;
-    NSManagedObjectContext *context = [NSManagedObjectContext contextForBackgroundThread];
 
-    // With parent-child contexts, we cannot use performBlockAndWait on child context
-    // from main thread as it may need to access parent (main queue), causing deadlock.
-    // If on main thread, use the main context instead; otherwise use background context.
-    if ([NSThread isMainThread]) {
-        context = [NSManagedObjectContext contextForMainThread];
+    // Determine the context to use for thread safety.
+    // Check both source and destination objects - either could be a managed object.
+    NSManagedObjectContext *context = nil;
+    if ([self.destinationObject isKindOfClass:[NSManagedObject class]]) {
+        context = [(NSManagedObject *)self.destinationObject managedObjectContext];
+    } else if ([self.sourceObject isKindOfClass:[NSManagedObject class]]) {
+        // For serialization: source is managed object, destination is dictionary
+        context = [(NSManagedObject *)self.sourceObject managedObjectContext];
     }
 
-    [context performBlockAndWait:^{
+    if (context) {
+        [context performBlockAndWait:^{
+            success = [super performMapping:error];
+            if ([self.objectMapping isKindOfClass:[RKManagedObjectMapping class]]) {
+                /**
+                 NOTE: Processing the pending changes here ensures that the managed object context generates observable
+                 callbacks that are important for maintaining any sort of cache that is consistent within a single
+                 object mapping operation. As the MOC is only saved when the aggregate operation is processed, we must
+                 manually invoke processPendingChanges to prevent recreating objects with the same primary key.
+                 See https://github.com/RestKit/RestKit/issues/661
+                 */
+                [self connectRelationships];
+            }
+        }];
+    } else {
+        // Fallback for non-managed objects
         success = [super performMapping:error];
-        if ([self.objectMapping isKindOfClass:[RKManagedObjectMapping class]]) {
-            /**
-             NOTE: Processing the pending changes here ensures that the managed object context generates observable
-             callbacks that are important for maintaining any sort of cache that is consistent within a single
-             object mapping operation. As the MOC is only saved when the aggregate operation is processed, we must
-             manually invoke processPendingChanges to prevent recreating objects with the same primary key.
-             See https://github.com/RestKit/RestKit/issues/661
-             */
-            [self connectRelationships];
-        }
-    }];
+    }
     return success;
 }
 

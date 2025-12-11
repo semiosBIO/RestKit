@@ -111,25 +111,55 @@
     // into an error where the object context cannot be saved. We do this
     // right before send to avoid sequencing issues where the target object is
     // set before the managed object store.
-    NSManagedObjectContext* context = [(NSManagedObject*)self.targetObject managedObjectContext];
+    NSManagedObjectContext* context = nil;
     if (self.targetObject && [self.targetObject isKindOfClass:[NSManagedObject class]]) {
-        // With parent-child contexts, we cannot use performBlockAndWait on a child context
-        // from the main thread, as the child may need to access the parent (main queue),
-        // causing a deadlock. Use performBlock (async) for background contexts when on main thread.
-        if ([NSThread isMainThread] && context != self.objectStore.primaryManagedObjectContext) {
-            // We're on main thread trying to access background context - use async to avoid deadlock.
-            // Capture objectID now (objectID is thread-safe), do the rest async.
+        context = [(NSManagedObject*)self.targetObject managedObjectContext];
+    }
+
+    // If we have a managed object as target, we need to access it on its context's queue.
+    // With parent-child contexts, if the object belongs to the child (background) context
+    // and we're on the main thread, we need to fetch it in the main (parent) context instead
+    // to avoid accessing it from the wrong thread during serialization.
+    if (context && [NSThread isMainThread] && context != self.objectStore.primaryManagedObjectContext) {
+        // Object belongs to background context but we're on main thread.
+        // Get a reference in the main context for thread-safe access during serialization.
+        NSManagedObjectID *objectID = [(NSManagedObject*)self.targetObject objectID];
+        _targetObjectID = [objectID retain];
+
+        NSManagedObjectContext *mainContext = self.objectStore.primaryManagedObjectContext;
+        NSManagedObject *mainContextObject = [mainContext objectWithID:objectID];
+
+        // Temporarily swap to main context object for serialization
+        id originalTarget = self.targetObject;
+        _targetObject = [mainContextObject retain];
+        [originalTarget release];
+
+        // Save background context asynchronously
+        [context performBlock:^{
+            _deleteObjectOnFailure = NO; // We'll check this on the background object separately if needed
+            [self.objectStore saveContext:context withError:nil];
+        }];
+    } else if (context) {
+        [context performBlockAndWait:^{
+            _deleteObjectOnFailure = [(NSManagedObject*)self.targetObject isNew];
+            [self.objectStore saveContext:context withError:nil];
             _targetObjectID = [[(NSManagedObject*)self.targetObject objectID] retain];
-            [context performBlock:^{
-                _deleteObjectOnFailure = [(NSManagedObject*)self.targetObject isNew];
-                [self.objectStore saveContext:context withError:nil];
-            }];
-        } else {
-            [context performBlockAndWait:^{
-                _deleteObjectOnFailure = [(NSManagedObject*)self.targetObject isNew];
-                [self.objectStore saveContext:context withError:nil];
-                _targetObjectID = [[(NSManagedObject*)self.targetObject objectID] retain];
-            }];
+        }];
+    }
+
+    // Also handle sourceObject - this is used for serialization (POST/PUT).
+    // If sourceObject is a managed object from background context and we're on main thread,
+    // we need to swap it to main context version for thread-safe serialization.
+    if (self.sourceObject && [self.sourceObject isKindOfClass:[NSManagedObject class]]) {
+        NSManagedObjectContext *sourceContext = [(NSManagedObject*)self.sourceObject managedObjectContext];
+        if (sourceContext && [NSThread isMainThread] && sourceContext != self.objectStore.primaryManagedObjectContext) {
+            NSManagedObjectID *sourceObjectID = [(NSManagedObject*)self.sourceObject objectID];
+            NSManagedObjectContext *mainContext = self.objectStore.primaryManagedObjectContext;
+            NSManagedObject *mainContextSourceObject = [mainContext objectWithID:sourceObjectID];
+
+            // Swap to main context object for serialization
+            [_sourceObject release];
+            _sourceObject = [mainContextSourceObject retain];
         }
     }
 
