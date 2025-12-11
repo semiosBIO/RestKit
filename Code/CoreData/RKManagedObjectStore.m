@@ -133,16 +133,6 @@ static RKManagedObjectStore *defaultObjectStore = nil;
         }
 
         [self createPersistentContainerWithName:storeFilename model:_managedObjectModel];
-        
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(mergeBackgroundContextChanges:)
-                                                     name:NSManagedObjectContextDidSaveNotification
-                                                   object:self.backgroundManagedObjectContext];
-        
-        [[NSNotificationCenter defaultCenter] addObserver:self
-                                                 selector:@selector(mergeMainContextChanges:)
-                                                     name:NSManagedObjectContextDidSaveNotification
-                                                   object:self.primaryManagedObjectContext];
 
         _cacheStrategy = [RKInMemoryManagedObjectCache new];
 
@@ -186,18 +176,18 @@ static RKManagedObjectStore *defaultObjectStore = nil;
  */
 - (BOOL)saveContext:(NSManagedObjectContext*)context withError:(NSError **)error {
     __block NSError *localError = nil;
-    __block BOOL success = NO;
-    
+    __block BOOL success = YES;
+
     [context performBlockAndWait:^{
         @try {
             if (![context save:&localError]) {
                 if (self.delegate != nil && [self.delegate respondsToSelector:@selector(managedObjectStore:didFailToSaveContext:error:exception:)]) {
                     [self.delegate managedObjectStore:self didFailToSaveContext:context error:localError exception:nil];
                 }
-                
+
                 NSDictionary* userInfo = [NSDictionary dictionaryWithObject:localError forKey:@"error"];
                 [[NSNotificationCenter defaultCenter] postNotificationName:RKManagedObjectStoreDidFailSaveNotification object:self userInfo:userInfo];
-                
+
                 if ([[localError domain] isEqualToString:@"NSCocoaErrorDomain"]) {
                     NSDictionary *userInfo = [localError userInfo];
                     NSArray *errors = [userInfo valueForKey:@"NSDetailedErrors"];
@@ -227,11 +217,7 @@ static RKManagedObjectStore *defaultObjectStore = nil;
                                    [userInfo valueForKey:@"NSValidationErrorObject"]);
                     }
                 }
-                
-                if (error) {
-                    *error = localError;
-                }
-                
+
                 success = NO;
             }
         }
@@ -242,12 +228,57 @@ static RKManagedObjectStore *defaultObjectStore = nil;
             else {
                 @throw;
             }
+            success = NO;
         }
-        
-        success = YES;
     }];
 
-    return success;
+    if (!success) {
+        if (error) {
+            *error = localError;
+        }
+        return NO;
+    }
+
+    // If this context has a parent, cascade the save to persist to disk
+    NSManagedObjectContext *parentContext = context.parentContext;
+    if (parentContext != nil) {
+        __block NSError *parentError = nil;
+        __block BOOL parentSuccess = YES;
+
+        [parentContext performBlockAndWait:^{
+            @try {
+                if (![parentContext save:&parentError]) {
+                    if (self.delegate != nil && [self.delegate respondsToSelector:@selector(managedObjectStore:didFailToSaveContext:error:exception:)]) {
+                        [self.delegate managedObjectStore:self didFailToSaveContext:parentContext error:parentError exception:nil];
+                    }
+
+                    NSDictionary* userInfo = [NSDictionary dictionaryWithObject:parentError forKey:@"error"];
+                    [[NSNotificationCenter defaultCenter] postNotificationName:RKManagedObjectStoreDidFailSaveNotification object:self userInfo:userInfo];
+
+                    RKLogError(@"Core Data Parent Context Save Error: %@", [parentError localizedDescription]);
+                    parentSuccess = NO;
+                }
+            }
+            @catch (NSException* e) {
+                if (self.delegate != nil && [self.delegate respondsToSelector:@selector(managedObjectStore:didFailToSaveContext:error:exception:)]) {
+                    [self.delegate managedObjectStore:self didFailToSaveContext:parentContext error:nil exception:e];
+                }
+                else {
+                    @throw;
+                }
+                parentSuccess = NO;
+            }
+        }];
+
+        if (!parentSuccess) {
+            if (error) {
+                *error = parentError;
+            }
+            return NO;
+        }
+    }
+
+    return YES;
 }
 
 - (void)createStoreIfNecessaryUsingSeedDatabase:(NSString*)seedDatabase {
@@ -282,24 +313,17 @@ static RKManagedObjectStore *defaultObjectStore = nil;
     [self.persistentContainer loadPersistentStoresWithCompletionHandler:
      ^(NSPersistentStoreDescription *desc, NSError *error) {
         NSAssert(!error, @"Failed to load store: %@", error);
-        self.persistentContainer.viewContext.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy;
+
+        // Configure the primary (main thread) context
         self.primaryManagedObjectContext = [self.persistentContainer viewContext];
-        self.backgroundManagedObjectContext = [[self.persistentContainer newBackgroundContext] autorelease];
-        self.backgroundManagedObjectContext.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy;
-    }];
-}
+        self.primaryManagedObjectContext.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy;
+        self.primaryManagedObjectContext.automaticallyMergesChangesFromParent = YES;
 
-- (void)mergeBackgroundContextChanges:(NSNotification *)notification {
-    // Merge changes into the main context on the main thread
-    [self.primaryManagedObjectContext performBlock:^{
-        [self.primaryManagedObjectContext mergeChangesFromContextDidSaveNotification:notification];
-    }];
-}
-
-- (void)mergeMainContextChanges:(NSNotification *)notification {
-    // Merge changes into the background context on the context's thread
-    [self.backgroundManagedObjectContext performBlock:^{
-        [self.backgroundManagedObjectContext mergeChangesFromContextDidSaveNotification:notification];
+        // Create background context as CHILD of primary context
+        NSManagedObjectContext *bgContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
+        bgContext.parentContext = self.primaryManagedObjectContext;
+        bgContext.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy;
+        self.backgroundManagedObjectContext = [bgContext autorelease];
     }];
 }
 
