@@ -158,12 +158,14 @@
      that will raise an exception when fired. existingObjectWithID:error: will return nil if the ID has been
      deleted. objectRegisteredForID: is also an acceptable approach.
      */
-    NSError *error = nil;
-    NSManagedObject *object = [self.managedObjectContext existingObjectWithID:objectID error:&error];
-    if (! object && error) {
-        RKLogError(@"Failed to retrieve managed object with ID %@. Error %@\n%@", objectID, [error localizedDescription], [error userInfo]);
-        return nil;
-    }
+    __block NSManagedObject *object = nil;
+    [self.managedObjectContext performBlockAndWait:^{
+        NSError *error = nil;
+        object = [self.managedObjectContext existingObjectWithID:objectID error:&error];
+        if (! object && error) {
+            RKLogError(@"Failed to retrieve managed object with ID %@. Error %@\n%@", objectID, [error localizedDescription], [error userInfo]);
+        }
+    }];
 
     return object;
 }
@@ -187,43 +189,47 @@
 
 - (void)addObject:(NSManagedObject *)object
 {
-    NSAssert([object.entity isEqual:self.entity], @"Cannot add object with entity '%@' to cache with entity of '%@'", [[object entity] name], [self.entity name]);
-    id attributeValue = [object valueForKey:self.attribute];
-    // Coerce to a string if possible
-    attributeValue = [self shouldCoerceAttributeToString:attributeValue] ? [attributeValue stringValue] : attributeValue;
-    if (attributeValue) {
-        NSManagedObjectID *objectID = [object objectID];
-        NSMutableArray *objectIDs = [self.attributeValuesToObjectIDs objectForKey:attributeValue];
-        if (objectIDs) {
-            if (! [objectIDs containsObject:objectID]) {
-                [objectIDs addObject:objectID];
+    [self.managedObjectContext performBlockAndWait:^{
+        NSAssert([object.entity isEqual:self.entity], @"Cannot add object with entity '%@' to cache with entity of '%@'", [[object entity] name], [self.entity name]);
+        id attributeValue = [object valueForKey:self.attribute];
+        // Coerce to a string if possible
+        attributeValue = [self shouldCoerceAttributeToString:attributeValue] ? [attributeValue stringValue] : attributeValue;
+        if (attributeValue) {
+            NSManagedObjectID *objectID = [object objectID];
+            NSMutableArray *objectIDs = [self.attributeValuesToObjectIDs objectForKey:attributeValue];
+            if (objectIDs) {
+                if (! [objectIDs containsObject:objectID]) {
+                    [objectIDs addObject:objectID];
+                }
+            } else {
+                objectIDs = [NSMutableArray arrayWithObject:objectID];
             }
-        } else {
-            objectIDs = [NSMutableArray arrayWithObject:objectID];
-        }
 
-        if (nil == self.attributeValuesToObjectIDs) self.attributeValuesToObjectIDs = [NSMutableDictionary dictionary];
-        [self.attributeValuesToObjectIDs setValue:objectIDs forKey:attributeValue];
-    } else {
-        RKLogWarning(@"Unable to add object with nil value for attribute '%@': %@", self.attribute, object);
-    }
+            if (nil == self.attributeValuesToObjectIDs) self.attributeValuesToObjectIDs = [NSMutableDictionary dictionary];
+            [self.attributeValuesToObjectIDs setValue:objectIDs forKey:attributeValue];
+        } else {
+            RKLogWarning(@"Unable to add object with nil value for attribute '%@': %@", self.attribute, object);
+        }
+    }];
 }
 
 - (void)removeObject:(NSManagedObject *)object
 {
-    NSAssert([object.entity isEqual:self.entity], @"Cannot remove object with entity '%@' from cache with entity of '%@'", [[object entity] name], [self.entity name]);
-    id attributeValue = [object valueForKey:self.attribute];
-    // Coerce to a string if possible
-    attributeValue = [self shouldCoerceAttributeToString:attributeValue] ? [attributeValue stringValue] : attributeValue;
-    if (attributeValue) {
-        NSManagedObjectID *objectID = [object objectID];
-        NSMutableArray *objectIDs = [self.attributeValuesToObjectIDs objectForKey:attributeValue];
-        if (objectIDs && [objectIDs containsObject:objectID]) {
-            [objectIDs removeObject:objectID];
+    [self.managedObjectContext performBlockAndWait:^{
+        NSAssert([object.entity isEqual:self.entity], @"Cannot remove object with entity '%@' from cache with entity of '%@'", [[object entity] name], [self.entity name]);
+        id attributeValue = [object valueForKey:self.attribute];
+        // Coerce to a string if possible
+        attributeValue = [self shouldCoerceAttributeToString:attributeValue] ? [attributeValue stringValue] : attributeValue;
+        if (attributeValue) {
+            NSManagedObjectID *objectID = [object objectID];
+            NSMutableArray *objectIDs = [self.attributeValuesToObjectIDs objectForKey:attributeValue];
+            if (objectIDs && [objectIDs containsObject:objectID]) {
+                [objectIDs removeObject:objectID];
+            }
+        } else {
+            RKLogWarning(@"Unable to remove object with nil value for attribute '%@': %@", self.attribute, object);
         }
-    } else {
-        RKLogWarning(@"Unable to remove object with nil value for attribute '%@': %@", self.attribute, object);
-    }
+    }];
 }
 
 - (BOOL)containsObjectWithAttributeValue:(id)attributeValue
@@ -235,11 +241,18 @@
 
 - (BOOL)containsObject:(NSManagedObject *)object
 {
-    if (! [object.entity isEqual:self.entity]) return NO;
-    id attributeValue = [object valueForKey:self.attribute];
-    // Coerce to a string if possible
-    attributeValue = [self shouldCoerceAttributeToString:attributeValue] ? [attributeValue stringValue] : attributeValue;
-    return [[self objectsWithAttributeValue:attributeValue] containsObject:object];
+    __block BOOL result = NO;
+    [self.managedObjectContext performBlockAndWait:^{
+        if (! [object.entity isEqual:self.entity]) {
+            result = NO;
+            return;
+        }
+        id attributeValue = [object valueForKey:self.attribute];
+        // Coerce to a string if possible
+        attributeValue = [self shouldCoerceAttributeToString:attributeValue] ? [attributeValue stringValue] : attributeValue;
+        result = [[self objectsWithAttributeValue:attributeValue] containsObject:object];
+    }];
+    return result;
 }
 
 - (void)managedObjectContextDidChange:(NSNotification *)notification

@@ -134,7 +134,7 @@
 - (id)mappableObjectForData:(id)mappableData {
     NSAssert(mappableData, @"Mappable data cannot be nil");
 
-    id object = nil;
+    __block id object = nil;
     id primaryKeyValue = nil;
     NSString* primaryKeyAttribute;
 
@@ -167,28 +167,33 @@
     }
 
     // If we have found the primary key attribute & value, try to find an existing instance to update
+    NSManagedObjectContext *bgContext = [self.objectStore backgroundManagedObjectContext];
     if (primaryKeyAttribute && primaryKeyValue && NO == [primaryKeyValue isEqual:[NSNull null]]) {
-        object = [self.objectStore.cacheStrategy findInstanceOfEntity:entity
-                                              withPrimaryKeyAttribute:primaryKeyAttribute
-                                                                value:primaryKeyValue
-                                               inManagedObjectContext:[self.objectStore backgroundManagedObjectContext]];
+        [bgContext performBlockAndWait:^{
+            object = [self.objectStore.cacheStrategy findInstanceOfEntity:entity
+                                                  withPrimaryKeyAttribute:primaryKeyAttribute
+                                                                    value:primaryKeyValue
+                                                   inManagedObjectContext:bgContext];
 
-        if (object && [self.objectStore.cacheStrategy respondsToSelector:@selector(didFetchObject:)]) {
-            [self.objectStore.cacheStrategy didFetchObject:object];
-        }
+            if (object && [self.objectStore.cacheStrategy respondsToSelector:@selector(didFetchObject:)]) {
+                [self.objectStore.cacheStrategy didFetchObject:object];
+            }
+        }];
     }
 
     if (object == nil) {
-        object = [[[NSManagedObject alloc] initWithEntity:entity
-                           insertIntoManagedObjectContext:[_objectStore backgroundManagedObjectContext]] autorelease];
-        if (primaryKeyAttribute && primaryKeyValue && ![primaryKeyValue isEqual:[NSNull null]]) {
-            id coercedPrimaryKeyValue = [entity coerceValueForPrimaryKey:primaryKeyValue];
-            [object setValue:coercedPrimaryKeyValue forKey:primaryKeyAttribute];
-        }
+        [bgContext performBlockAndWait:^{
+            object = [[[NSManagedObject alloc] initWithEntity:entity
+                               insertIntoManagedObjectContext:bgContext] autorelease];
+            if (primaryKeyAttribute && primaryKeyValue && ![primaryKeyValue isEqual:[NSNull null]]) {
+                id coercedPrimaryKeyValue = [entity coerceValueForPrimaryKey:primaryKeyValue];
+                [object setValue:coercedPrimaryKeyValue forKey:primaryKeyAttribute];
+            }
 
-        if ([self.objectStore.cacheStrategy respondsToSelector:@selector(didCreateObject:)]) {
-            [self.objectStore.cacheStrategy didCreateObject:object];
-        }
+            if ([self.objectStore.cacheStrategy respondsToSelector:@selector(didCreateObject:)]) {
+                [self.objectStore.cacheStrategy didCreateObject:object];
+            }
+        }];
     }
     return object;
 }

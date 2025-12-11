@@ -234,13 +234,12 @@ static RKManagedObjectStore *defaultObjectStore = nil;
     }];
 
     // If this context has a parent, cascade the save to persist to disk.
-    // We must dispatch to the parent's queue properly to avoid deadlocks.
+    // The parent is a main queue context, so we need to save on the main queue.
     NSManagedObjectContext *parentContext = context.parentContext;
     if (parentContext != nil && success) {
-        // The parent is a main queue context. We need to save it on the main queue.
-        // Use dispatch_async to avoid deadlock when main thread is waiting for us.
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [parentContext performBlockAndWait:^{
+        if ([NSThread isMainThread]) {
+            // Already on main thread, save directly (but async via performBlock to avoid re-entrancy)
+            [parentContext performBlock:^{
                 NSError *parentError = nil;
                 if (![parentContext save:&parentError]) {
                     if (self.delegate != nil && [self.delegate respondsToSelector:@selector(managedObjectStore:didFailToSaveContext:error:exception:)]) {
@@ -249,7 +248,19 @@ static RKManagedObjectStore *defaultObjectStore = nil;
                     RKLogError(@"Core Data Parent Context Save Error: %@", [parentError localizedDescription]);
                 }
             }];
-        });
+        } else {
+            // On background thread - safe to wait for main thread synchronously
+            [parentContext performBlockAndWait:^{
+                NSError *parentError = nil;
+                if (![parentContext save:&parentError]) {
+                    if (self.delegate != nil && [self.delegate respondsToSelector:@selector(managedObjectStore:didFailToSaveContext:error:exception:)]) {
+                        [self.delegate managedObjectStore:self didFailToSaveContext:parentContext error:parentError exception:nil];
+                    }
+                    RKLogError(@"Core Data Parent Context Save Error: %@", [parentError localizedDescription]);
+                    success = NO;
+                }
+            }];
+        }
     }
 
     if (!success) {

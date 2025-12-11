@@ -88,7 +88,12 @@
 // Overload the target object reader to return a thread-local copy of the target object
 - (id)targetObject {
     if ([NSThread isMainThread] == NO && _targetObjectID) {
-        return [[self.objectStore backgroundManagedObjectContext] objectWithID:_targetObjectID];
+        __block NSManagedObject *object = nil;
+        NSManagedObjectContext *bgContext = [self.objectStore backgroundManagedObjectContext];
+        [bgContext performBlockAndWait:^{
+            object = [bgContext objectWithID:_targetObjectID];
+        }];
+        return object;
     }
 
     return _targetObject;
@@ -199,9 +204,12 @@
 - (void)processMappingResult:(RKObjectMappingResult*)result {
     NSAssert(_sentSynchronously || ![NSThread isMainThread], @"Mapping result processing should occur on a background thread");
     if (_targetObjectID && self.targetObject && self.method == RKRequestMethodDELETE) {
-        NSManagedObject* backgroundThreadObject = [self.objectStore objectWithID:_targetObjectID];
-        RKLogInfo(@"Deleting local object %@ due to DELETE request", backgroundThreadObject);
-        [[self.objectStore backgroundManagedObjectContext] deleteObject:backgroundThreadObject];
+        NSManagedObjectContext *bgContext = [self.objectStore backgroundManagedObjectContext];
+        [bgContext performBlockAndWait:^{
+            NSManagedObject* backgroundThreadObject = [bgContext objectWithID:_targetObjectID];
+            RKLogInfo(@"Deleting local object %@ due to DELETE request", backgroundThreadObject);
+            [bgContext deleteObject:backgroundThreadObject];
+        }];
     }
 
     // If the response was successful, save the store...
@@ -241,13 +249,16 @@
     if (_targetObjectID) {
         if (_deleteObjectOnFailure) {
             RKLogInfo(@"Error response encountered: Deleting existing managed object with ID: %@", _targetObjectID);
-            NSManagedObject* objectToDelete = [self.objectStore objectWithID:_targetObjectID];
-            if (objectToDelete) {
-                [[self.objectStore backgroundManagedObjectContext] deleteObject:objectToDelete];
-                [self.objectStore save:nil];
-            } else {
-                RKLogWarning(@"Unable to delete existing managed object with ID: %@. Object not found in the store.", _targetObjectID);
-            }
+            NSManagedObjectContext *bgContext = [self.objectStore backgroundManagedObjectContext];
+            [bgContext performBlockAndWait:^{
+                NSManagedObject* objectToDelete = [bgContext objectWithID:_targetObjectID];
+                if (objectToDelete) {
+                    [bgContext deleteObject:objectToDelete];
+                } else {
+                    RKLogWarning(@"Unable to delete existing managed object with ID: %@. Object not found in the store.", _targetObjectID);
+                }
+            }];
+            [self.objectStore saveContext:bgContext withError:nil];
         } else {
             RKLogDebug(@"Skipping deletion of existing managed object");
         }
