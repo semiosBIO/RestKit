@@ -28,6 +28,7 @@
 #import "RKObjectMappingProvider+Contexts.h"
 #import "RKObjectSerializer.h"
 #import "NSManagedObject+ActiveRecord.h"
+#import "RKManagedObjectStore.h"
 
 // Set Logging Component
 #undef RKLogComponent
@@ -41,6 +42,7 @@
 @interface RKObjectLoader () {
     NSManagedObjectID *_targetObjectID;  // Captured on main thread for safe background access
     NSManagedObjectID *_sourceObjectID;  // Captured on main thread for safe background access
+    NSManagedObjectContext *_mappingContext;  // Fresh sibling context for this request
 }
 @property (nonatomic, assign, readwrite, getter = isLoaded) BOOL loaded;
 @property (nonatomic, assign, readwrite, getter = isLoading) BOOL loading;
@@ -87,7 +89,9 @@
     [_targetObjectID release];
     _targetObjectID = nil;
     [_sourceObjectID release];
-    _sourceObjectID = nil;    
+    _sourceObjectID = nil;
+    [_mappingContext release];
+    _mappingContext = nil;
     [_objectMapping release];
     _objectMapping = nil;
     [_result release];
@@ -112,6 +116,10 @@
     [super reset];
     [_result release];
     _result = nil;
+}
+
+- (NSManagedObjectContext *)mappingContext {
+    return _mappingContext;
 }
 
 - (void)informDelegateOfError:(NSError *)error {
@@ -261,13 +269,12 @@
         mappingProvider = self.mappingProvider;
     }
 
-    // If targetObject is a managed object, fetch it from the background context using
+    // If targetObject is a managed object, fetch it from the per-request mapping context using
     // the objectID captured on the main thread. Accessing self.targetObject directly
     // from the background thread is unsafe.
     id targetObjectForMapping = nil;
     if (_targetObjectID) {
-        NSManagedObjectContext *bgContext = [NSManagedObjectContext contextForBackgroundThread];
-        targetObjectForMapping = [bgContext existingObjectWithID:_targetObjectID error:nil];
+        targetObjectForMapping = [_mappingContext existingObjectWithID:_targetObjectID error:nil];
     } else {
         // Not a managed object, safe to use directly
         targetObjectForMapping = self.targetObject;
@@ -277,11 +284,11 @@
 }
 
 - (void)performMappingInDispatchQueue {
-    NSManagedObjectContext* context = [NSManagedObjectContext contextForBackgroundThread];
-    [context performBlock:^{
+    // Use the per-request mapping context created in didFinishLoad:
+    [_mappingContext performBlock:^{
         NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
 
-        RKLogDebug(@"Beginning object mapping activities within GCD queue labeled: %@", context);
+        RKLogDebug(@"Beginning object mapping activities within GCD queue labeled: %@", _mappingContext);
         NSError *error = nil;
         _result = [[self performMapping:&error] retain];
         NSAssert(_result || error, @"Expected performMapping to return a mapping result or an error.");
@@ -316,19 +323,17 @@
         return NO;
     } else if ([self.response isNoContent]) {
         // The No Content (204) response will never have a message body or a MIME Type.
-        // Use objectIDs captured on main thread to fetch objects in background context.
+        // Use objectIDs captured on main thread to fetch objects in per-request mapping context.
         id resultDictionary = nil;
         id targetObj = nil;
         if (_targetObjectID) {
-            NSManagedObjectContext *bgContext = [NSManagedObjectContext contextForBackgroundThread];
-            targetObj = [bgContext existingObjectWithID:_targetObjectID error:nil];
+            targetObj = [_mappingContext existingObjectWithID:_targetObjectID error:nil];
         } else {
             targetObj = self.targetObject;  // Not a managed object, safe to access
         }
         id sourceObj = nil;
         if (_sourceObjectID) {
-            NSManagedObjectContext *bgContext = [NSManagedObjectContext contextForBackgroundThread];
-            sourceObj = [bgContext existingObjectWithID:_sourceObjectID error:nil];
+            sourceObj = [_mappingContext existingObjectWithID:_sourceObjectID error:nil];
         } else {
             sourceObj = self.sourceObject;  // Not a managed object, safe to access
         }
@@ -464,7 +469,12 @@
         _sourceObjectID = [[(NSManagedObject *)self.sourceObject objectID] retain];
     }
 
-    [[NSManagedObjectContext contextForBackgroundThread] performBlock:^{
+    // Create a fresh sibling context for this request.
+    // This ensures no stale data and direct saves to the persistent store.
+    [_mappingContext release];
+    _mappingContext = [[RKManagedObjectStore defaultObjectStore] newBackgroundContext];
+
+    [_mappingContext performBlock:^{
         self.response = response;
 
         if ((_cachePolicy & RKRequestCachePolicyEtag) && [response isNotModified]) {

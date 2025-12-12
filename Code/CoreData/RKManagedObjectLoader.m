@@ -89,9 +89,10 @@
 - (id)targetObject {
     if ([NSThread isMainThread] == NO && _targetObjectID) {
         __block NSManagedObject *object = nil;
-        NSManagedObjectContext *bgContext = [self.objectStore backgroundManagedObjectContext];
-        [bgContext performBlockAndWait:^{
-            object = [bgContext objectWithID:_targetObjectID];
+        // Use the per-request mapping context created in didFinishLoad:
+        NSManagedObjectContext *context = self.mappingContext;
+        [context performBlockAndWait:^{
+            object = [context objectWithID:_targetObjectID];
         }];
         return object;
     }
@@ -192,7 +193,7 @@
         for (id object in cachedObjects) {
             if (NO == [results containsObject:object]) {
                 RKLogTrace(@"Deleting orphaned object %@: not found in result set and expected at this resource path", object);
-                [[self.objectStore backgroundManagedObjectContext] deleteObject:object];
+                [self.mappingContext deleteObject:object];
             }
         }
     } else {
@@ -204,11 +205,11 @@
 - (void)processMappingResult:(RKObjectMappingResult*)result {
     NSAssert(_sentSynchronously || ![NSThread isMainThread], @"Mapping result processing should occur on a background thread");
     if (_targetObjectID && self.targetObject && self.method == RKRequestMethodDELETE) {
-        NSManagedObjectContext *bgContext = [self.objectStore backgroundManagedObjectContext];
-        [bgContext performBlockAndWait:^{
-            NSManagedObject* backgroundThreadObject = [bgContext objectWithID:_targetObjectID];
+        NSManagedObjectContext *context = self.mappingContext;
+        [context performBlockAndWait:^{
+            NSManagedObject* backgroundThreadObject = [context objectWithID:_targetObjectID];
             RKLogInfo(@"Deleting local object %@ due to DELETE request", backgroundThreadObject);
-            [bgContext deleteObject:backgroundThreadObject];
+            [context deleteObject:backgroundThreadObject];
         }];
     }
 
@@ -216,7 +217,7 @@
     if ([self.response isSuccessful]) {
         [self deleteCachedObjectsMissingFromResult:result];
         NSError *error = nil;
-        BOOL success = [self.objectStore saveContext:[self.objectStore backgroundManagedObjectContext] withError:&error];
+        BOOL success = [self.objectStore saveContext:self.mappingContext withError:&error];
         if (! success) {
             RKLogError(@"Failed to save managed object context after mapping completed: %@", [error localizedDescription]);
             NSMethodSignature* signature = [(NSObject *)self methodSignatureForSelector:@selector(informDelegateOfError:)];
@@ -249,16 +250,16 @@
     if (_targetObjectID) {
         if (_deleteObjectOnFailure) {
             RKLogInfo(@"Error response encountered: Deleting existing managed object with ID: %@", _targetObjectID);
-            NSManagedObjectContext *bgContext = [self.objectStore backgroundManagedObjectContext];
-            [bgContext performBlockAndWait:^{
-                NSManagedObject* objectToDelete = [bgContext objectWithID:_targetObjectID];
+            NSManagedObjectContext *context = self.mappingContext;
+            [context performBlockAndWait:^{
+                NSManagedObject* objectToDelete = [context objectWithID:_targetObjectID];
                 if (objectToDelete) {
-                    [bgContext deleteObject:objectToDelete];
+                    [context deleteObject:objectToDelete];
                 } else {
                     RKLogWarning(@"Unable to delete existing managed object with ID: %@. Object not found in the store.", _targetObjectID);
                 }
             }];
-            [self.objectStore saveContext:bgContext withError:nil];
+            [self.objectStore saveContext:context withError:nil];
         } else {
             RKLogDebug(@"Skipping deletion of existing managed object");
         }

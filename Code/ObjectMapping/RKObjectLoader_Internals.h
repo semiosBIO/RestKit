@@ -20,9 +20,17 @@
 
 #import <Foundation/Foundation.h>
 
+@class NSManagedObjectContext;
+
 @interface RKObjectLoader (Internals) <RKObjectMapperDelegate>
 
 @property (nonatomic, readonly) RKClient* client;
+
+/**
+ The per-request managed object context used for object mapping.
+ Created as a fresh sibling context in didFinishLoad: for thread safety and isolation.
+ */
+@property (nonatomic, readonly) NSManagedObjectContext* mappingContext;
 
 - (void)handleTargetObject;
 - (void)informDelegateOfObjectLoadWithResultDictionary:(NSDictionary*)dictionary;
