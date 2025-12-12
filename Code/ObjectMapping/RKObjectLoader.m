@@ -38,7 +38,10 @@
 - (void)postRequestDidFailWithErrorNotification:(NSError *)error;
 @end
 
-@interface RKObjectLoader ()
+@interface RKObjectLoader () {
+    NSManagedObjectID *_targetObjectID;  // Captured on main thread for safe background access
+    NSManagedObjectID *_sourceObjectID;  // Captured on main thread for safe background access
+}
 @property (nonatomic, assign, readwrite, getter = isLoaded) BOOL loaded;
 @property (nonatomic, assign, readwrite, getter = isLoading) BOOL loading;
 @property (nonatomic, retain, readwrite) RKResponse *response;
@@ -80,7 +83,11 @@
     [_sourceObject release];
     _sourceObject = nil;
     [_targetObject release];
-    _targetObject = nil;    
+    _targetObject = nil;
+    [_targetObjectID release];
+    _targetObjectID = nil;
+    [_sourceObjectID release];
+    _sourceObjectID = nil;    
     [_objectMapping release];
     _objectMapping = nil;
     [_result release];
@@ -254,13 +261,16 @@
         mappingProvider = self.mappingProvider;
     }
 
-    // If targetObject is a managed object, fetch it from the background context.
-    // With parent-child contexts, objects cannot cross context boundaries directly.
-    id targetObjectForMapping = self.targetObject;
-    if ([targetObjectForMapping isKindOfClass:[NSManagedObject class]]) {
+    // If targetObject is a managed object, fetch it from the background context using
+    // the objectID captured on the main thread. Accessing self.targetObject directly
+    // from the background thread is unsafe.
+    id targetObjectForMapping = nil;
+    if (_targetObjectID) {
         NSManagedObjectContext *bgContext = [NSManagedObjectContext contextForBackgroundThread];
-        NSManagedObjectID *objectID = [(NSManagedObject *)targetObjectForMapping objectID];
-        targetObjectForMapping = [bgContext existingObjectWithID:objectID error:nil];
+        targetObjectForMapping = [bgContext existingObjectWithID:_targetObjectID error:nil];
+    } else {
+        // Not a managed object, safe to use directly
+        targetObjectForMapping = self.targetObject;
     }
 
     return [self mapResponseWithMappingProvider:mappingProvider toObject:targetObjectForMapping inContext:RKObjectMappingProviderContextObjectsByKeyPath error:error];
@@ -306,17 +316,21 @@
         return NO;
     } else if ([self.response isNoContent]) {
         // The No Content (204) response will never have a message body or a MIME Type.
-        // Fetch managed objects from background context if needed, as we're inside performBlock.
+        // Use objectIDs captured on main thread to fetch objects in background context.
         id resultDictionary = nil;
-        id targetObj = self.targetObject;
-        if ([targetObj isKindOfClass:[NSManagedObject class]]) {
+        id targetObj = nil;
+        if (_targetObjectID) {
             NSManagedObjectContext *bgContext = [NSManagedObjectContext contextForBackgroundThread];
-            targetObj = [bgContext existingObjectWithID:[(NSManagedObject *)targetObj objectID] error:nil];
+            targetObj = [bgContext existingObjectWithID:_targetObjectID error:nil];
+        } else {
+            targetObj = self.targetObject;  // Not a managed object, safe to access
         }
-        id sourceObj = self.sourceObject;
-        if ([sourceObj isKindOfClass:[NSManagedObject class]]) {
+        id sourceObj = nil;
+        if (_sourceObjectID) {
             NSManagedObjectContext *bgContext = [NSManagedObjectContext contextForBackgroundThread];
-            sourceObj = [bgContext existingObjectWithID:[(NSManagedObject *)sourceObj objectID] error:nil];
+            sourceObj = [bgContext existingObjectWithID:_sourceObjectID error:nil];
+        } else {
+            sourceObj = self.sourceObject;  // Not a managed object, safe to access
         }
         if (targetObj) {
             resultDictionary = [NSDictionary dictionaryWithObject:targetObj forKey:@""];
@@ -437,6 +451,19 @@
 
 // NOTE: We do NOT call super here. We are overloading the default behavior from RKRequest
 - (void)didFinishLoad:(RKResponse*)response {
+    // Capture objectIDs on main thread before entering background block.
+    // Accessing managed objects directly from the background thread is unsafe.
+    [_targetObjectID release];
+    _targetObjectID = nil;
+    if ([self.targetObject isKindOfClass:[NSManagedObject class]]) {
+        _targetObjectID = [[(NSManagedObject *)self.targetObject objectID] retain];
+    }
+    [_sourceObjectID release];
+    _sourceObjectID = nil;
+    if ([self.sourceObject isKindOfClass:[NSManagedObject class]]) {
+        _sourceObjectID = [[(NSManagedObject *)self.sourceObject objectID] retain];
+    }
+
     [[NSManagedObjectContext contextForBackgroundThread] performBlock:^{
         self.response = response;
 
