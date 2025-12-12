@@ -161,30 +161,43 @@
     __block NSManagedObject *object = nil;
     [self.managedObjectContext performBlockAndWait:^{
         NSError *error = nil;
-        object = [self.managedObjectContext existingObjectWithID:objectID error:&error];
+        object = [[self.managedObjectContext existingObjectWithID:objectID error:&error] retain];
         if (! object && error) {
             RKLogError(@"Failed to retrieve managed object with ID %@. Error %@\n%@", objectID, [error localizedDescription], [error userInfo]);
         }
     }];
 
-    return object;
+    return [object autorelease];
 }
 
 - (NSArray *)objectsWithAttributeValue:(id)attributeValue
 {
     attributeValue = [self shouldCoerceAttributeToString:attributeValue] ? [attributeValue stringValue] : attributeValue;
-    NSMutableArray *objectIDs = [self.attributeValuesToObjectIDs objectForKey:attributeValue];
-    if (objectIDs) {
-        NSMutableArray *objects = [NSMutableArray arrayWithCapacity:[objectIDs count]];
-        for (NSManagedObjectID *objectID in objectIDs) {
-            NSManagedObject *object = [self objectWithID:objectID];
-            if (object) [objects addObject:object];
+
+    // Perform the entire lookup within performBlockAndWait to ensure thread safety
+    // and proper memory management with the context's queue.
+    __block NSArray *result = nil;
+    [self.managedObjectContext performBlockAndWait:^{
+        // Copy the objectIDs array to protect against concurrent modification during flush.
+        // Under MRC, the array returned by objectForKey: is unretained. If flush is called
+        // (via NSManagedObjectContextDidSaveNotification) while we're iterating, the dictionary
+        // is released which releases the array, leaving us with a dangling pointer.
+        NSMutableArray *objectIDs = [self.attributeValuesToObjectIDs objectForKey:attributeValue];
+        if (objectIDs) {
+            NSArray *objectIDsCopy = [[objectIDs copy] autorelease];
+            NSMutableArray *objects = [NSMutableArray arrayWithCapacity:[objectIDsCopy count]];
+            for (NSManagedObjectID *objectID in objectIDsCopy) {
+                NSError *error = nil;
+                NSManagedObject *object = [self.managedObjectContext existingObjectWithID:objectID error:&error];
+                if (object) {
+                    [objects addObject:object];
+                }
+            }
+            result = [objects retain];
         }
+    }];
 
-        return objects;
-    }
-
-    return [NSArray array];
+    return result ? [result autorelease] : [NSArray array];
 }
 
 - (void)addObject:(NSManagedObject *)object

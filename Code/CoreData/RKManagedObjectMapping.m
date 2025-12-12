@@ -170,10 +170,12 @@
     NSManagedObjectContext *bgContext = [self.objectStore backgroundManagedObjectContext];
     if (primaryKeyAttribute && primaryKeyValue && NO == [primaryKeyValue isEqual:[NSNull null]]) {
         [bgContext performBlockAndWait:^{
-            object = [self.objectStore.cacheStrategy findInstanceOfEntity:entity
+            // Retain the object inside the block to ensure it survives beyond the block.
+            // Under MRC, __block variables are not automatically retained.
+            object = [[self.objectStore.cacheStrategy findInstanceOfEntity:entity
                                                   withPrimaryKeyAttribute:primaryKeyAttribute
                                                                     value:primaryKeyValue
-                                                   inManagedObjectContext:bgContext];
+                                                   inManagedObjectContext:bgContext] retain];
 
             if (object && [self.objectStore.cacheStrategy respondsToSelector:@selector(didFetchObject:)]) {
                 [self.objectStore.cacheStrategy didFetchObject:object];
@@ -183,8 +185,9 @@
 
     if (object == nil) {
         [bgContext performBlockAndWait:^{
-            object = [[[NSManagedObject alloc] initWithEntity:entity
-                               insertIntoManagedObjectContext:bgContext] autorelease];
+            // Use alloc/init without autorelease, then retain for the __block variable
+            object = [[NSManagedObject alloc] initWithEntity:entity
+                               insertIntoManagedObjectContext:bgContext];
             if (primaryKeyAttribute && primaryKeyValue && ![primaryKeyValue isEqual:[NSNull null]]) {
                 id coercedPrimaryKeyValue = [entity coerceValueForPrimaryKey:primaryKeyValue];
                 [object setValue:coercedPrimaryKeyValue forKey:primaryKeyAttribute];
@@ -195,7 +198,7 @@
             }
         }];
     }
-    return object;
+    return [object autorelease];
 }
 
 - (Class)classForProperty:(NSString*)propertyName {
