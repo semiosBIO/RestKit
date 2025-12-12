@@ -190,8 +190,8 @@
     RKLogTrace(@"bodyAsString: %@", bodyAsString);
     if (bodyAsString == nil || [[bodyAsString stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]] length] == 0) {
         RKLogDebug(@"Mapping attempted on empty response body...");
-        if (self.targetObject) {
-            return [RKObjectMappingResult mappingResultWithDictionary:[NSDictionary dictionaryWithObject:self.targetObject forKey:@""]];
+        if (targetObject) {
+            return [RKObjectMappingResult mappingResultWithDictionary:[NSDictionary dictionaryWithObject:targetObject forKey:@""]];
         }
 
         return [RKObjectMappingResult mappingResultWithDictionary:[NSDictionary dictionary]];
@@ -254,7 +254,16 @@
         mappingProvider = self.mappingProvider;
     }
 
-    return [self mapResponseWithMappingProvider:mappingProvider toObject:self.targetObject inContext:RKObjectMappingProviderContextObjectsByKeyPath error:error];
+    // If targetObject is a managed object, fetch it from the background context.
+    // With parent-child contexts, objects cannot cross context boundaries directly.
+    id targetObjectForMapping = self.targetObject;
+    if ([targetObjectForMapping isKindOfClass:[NSManagedObject class]]) {
+        NSManagedObjectContext *bgContext = [NSManagedObjectContext contextForBackgroundThread];
+        NSManagedObjectID *objectID = [(NSManagedObject *)targetObjectForMapping objectID];
+        targetObjectForMapping = [bgContext existingObjectWithID:objectID error:nil];
+    }
+
+    return [self mapResponseWithMappingProvider:mappingProvider toObject:targetObjectForMapping inContext:RKObjectMappingProviderContextObjectsByKeyPath error:error];
 }
 
 - (void)performMappingInDispatchQueue {
@@ -297,11 +306,22 @@
         return NO;
     } else if ([self.response isNoContent]) {
         // The No Content (204) response will never have a message body or a MIME Type.
+        // Fetch managed objects from background context if needed, as we're inside performBlock.
         id resultDictionary = nil;
-        if (self.targetObject) {
-            resultDictionary = [NSDictionary dictionaryWithObject:self.targetObject forKey:@""];
-        } else if (self.sourceObject) {
-            resultDictionary = [NSDictionary dictionaryWithObject:self.sourceObject forKey:@""];
+        id targetObj = self.targetObject;
+        if ([targetObj isKindOfClass:[NSManagedObject class]]) {
+            NSManagedObjectContext *bgContext = [NSManagedObjectContext contextForBackgroundThread];
+            targetObj = [bgContext existingObjectWithID:[(NSManagedObject *)targetObj objectID] error:nil];
+        }
+        id sourceObj = self.sourceObject;
+        if ([sourceObj isKindOfClass:[NSManagedObject class]]) {
+            NSManagedObjectContext *bgContext = [NSManagedObjectContext contextForBackgroundThread];
+            sourceObj = [bgContext existingObjectWithID:[(NSManagedObject *)sourceObj objectID] error:nil];
+        }
+        if (targetObj) {
+            resultDictionary = [NSDictionary dictionaryWithObject:targetObj forKey:@""];
+        } else if (sourceObj) {
+            resultDictionary = [NSDictionary dictionaryWithObject:sourceObj forKey:@""];
         } else {
             resultDictionary = [NSDictionary dictionary];
         }
