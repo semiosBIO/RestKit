@@ -314,6 +314,8 @@ static RKManagedObjectStore *defaultObjectStore = nil;
         NSManagedObjectContext *bgContext = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
         bgContext.parentContext = self.primaryManagedObjectContext;
         bgContext.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy;
+        // Enable auto-merge so background context sees changes from sibling contexts via parent
+        bgContext.automaticallyMergesChangesFromParent = YES;
         self.backgroundManagedObjectContext = [bgContext autorelease];
     }];
 }
