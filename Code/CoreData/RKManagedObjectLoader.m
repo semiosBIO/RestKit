@@ -159,13 +159,25 @@
     if (self.sourceObject && [self.sourceObject isKindOfClass:[NSManagedObject class]]) {
         NSManagedObjectContext *sourceContext = [(NSManagedObject*)self.sourceObject managedObjectContext];
         if (sourceContext && [NSThread isMainThread] && sourceContext != self.objectStore.primaryManagedObjectContext) {
+            // Save source context first to ensure object has permanent ID and is persisted
+            [sourceContext performBlockAndWait:^{
+                [self.objectStore saveContext:sourceContext withError:nil];
+            }];
+
             NSManagedObjectID *sourceObjectID = [(NSManagedObject*)self.sourceObject objectID];
             NSManagedObjectContext *mainContext = self.objectStore.primaryManagedObjectContext;
-            NSManagedObject *mainContextSourceObject = [mainContext objectWithID:sourceObjectID];
 
-            // Swap to main context object for serialization
-            [_sourceObject release];
-            _sourceObject = [mainContextSourceObject retain];
+            // With sibling contexts, we need to refresh to see changes from other contexts
+            NSManagedObject *mainContextSourceObject = [mainContext existingObjectWithID:sourceObjectID error:nil];
+            if (mainContextSourceObject) {
+                // Refresh to ensure we have the latest data from the persistent store
+                [mainContext refreshObject:mainContextSourceObject mergeChanges:YES];
+
+                // Swap to main context object for serialization
+                [_sourceObject release];
+                _sourceObject = [mainContextSourceObject retain];
+            }
+            // If object not found in main context, keep original sourceObject and let mapping handle it
         }
     }
 
