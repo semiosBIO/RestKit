@@ -146,4 +146,11 @@ extern NSString* const RKManagedObjectStoreDidFailSaveNotification;
 @property (nonatomic, retain, readonly) NSManagedObjectContext *primaryManagedObjectContext;
 @property (nonatomic, retain, readonly) NSManagedObjectContext *backgroundManagedObjectContext;
 
+/**
+ Creates a new background context as a sibling of the primary context.
+ This context saves directly to the persistent store (not through a parent).
+ The caller is responsible for releasing the returned context (MRC).
+ */
+- (NSManagedObjectContext *)newBackgroundContext;
+
 @end

@@ -320,4 +320,11 @@ static RKManagedObjectStore *defaultObjectStore = nil;
     }];
 }
 
+- (NSManagedObjectContext *)newBackgroundContext {
+    NSManagedObjectContext *context = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
+    context.persistentStoreCoordinator = self.persistentContainer.persistentStoreCoordinator;
+    context.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy;
+    return context;  // Caller owns - must release (MRC)
+}
+
 @end
