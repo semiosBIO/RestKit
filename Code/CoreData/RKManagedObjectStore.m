@@ -26,7 +26,6 @@
 #import "RKObjectPropertyInspector+CoreData.h"
 #import "RKAlert.h"
 #import "RKDirectory.h"
-#import "RKInMemoryManagedObjectCache.h"
 #import "RKFetchRequestManagedObjectCache.h"
 #import "NSBundle+RKAdditions.h"
 #import "NSManagedObjectContext+RKAdditions.h"
@@ -134,7 +133,7 @@ static RKManagedObjectStore *defaultObjectStore = nil;
 
         [self createPersistentContainerWithName:storeFilename model:_managedObjectModel];
 
-        _cacheStrategy = [RKInMemoryManagedObjectCache new];
+        _cacheStrategy = [RKFetchRequestManagedObjectCache new];
 
         // Ensure there is a search word observer
         [RKSearchWordObserver sharedObserver];

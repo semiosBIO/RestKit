@@ -394,7 +394,7 @@
 
 - (void)testMappingAPayloadContainingRepeatedObjectsDoesNotYieldDuplicatesWithInMemoryMappingCache {
     RKManagedObjectStore *store = [RKTestFactory managedObjectStore];
-    store.cacheStrategy = [RKInMemoryManagedObjectCache new];
+    store.cacheStrategy = [RKFetchRequestManagedObjectCache new];
 
     RKManagedObjectMapping* childMapping = [RKManagedObjectMapping mappingForClass:[RKChild class] inManagedObjectStore:store];
     childMapping.primaryKeyAttribute = @"childID";
@@ -457,7 +457,7 @@
 
 - (void)testMappingAPayloadContainingRepeatedObjectsPerformsAcceptablyWithInMemoryMappingCache {
     RKManagedObjectStore *store = [RKTestFactory managedObjectStore];
-    store.cacheStrategy = [RKInMemoryManagedObjectCache new];
+    store.cacheStrategy = [RKFetchRequestManagedObjectCache new];
 
     RKManagedObjectMapping* childMapping = [RKManagedObjectMapping mappingForClass:[RKChild class] inManagedObjectStore:store];
     childMapping.primaryKeyAttribute = @"childID";

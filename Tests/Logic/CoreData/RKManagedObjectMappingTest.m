@@ -226,7 +226,7 @@
 - (void)testShouldFindExistingManagedObjectsByPrimaryKeyWithInMemoryCache {
     RKManagedObjectStore* store = [RKTestFactory managedObjectStore];
     [RKHuman truncateAllInContext:store.primaryManagedObjectContext];
-    store.cacheStrategy = [RKInMemoryManagedObjectCache new];
+    store.cacheStrategy = [RKFetchRequestManagedObjectCache new];
     RKManagedObjectMapping* mapping = [RKManagedObjectMapping mappingForClass:[RKHuman class] inManagedObjectStore:store];
     mapping.primaryKeyAttribute = @"railsID";
     [mapping addAttributeMapping:[RKObjectAttributeMapping mappingFromKeyPath:@"id" toKeyPath:@"railsID"]];
@@ -246,7 +246,7 @@
 - (void)testShouldFindExistingManagedObjectsByPrimaryKeyPathWithInMemoryCache {
     RKManagedObjectStore* store = [RKTestFactory managedObjectStore];
     [RKHuman truncateAllInContext:store.primaryManagedObjectContext];
-    store.cacheStrategy = [RKInMemoryManagedObjectCache new];
+    store.cacheStrategy = [RKFetchRequestManagedObjectCache new];
     [RKHuman truncateAll];
     RKManagedObjectMapping* mapping = [RKManagedObjectMapping mappingForClass:[RKHuman class] inManagedObjectStore:store];
     mapping.primaryKeyAttribute = @"railsID";
@@ -294,7 +294,7 @@
 - (void)testMappingWithInMemoryCacheWherePrimaryKeyAttributeOfMappingDisagreesWithEntity
 {
     RKManagedObjectStore* store = [RKTestFactory managedObjectStore];
-    store.cacheStrategy = [RKInMemoryManagedObjectCache new];
+    store.cacheStrategy = [RKFetchRequestManagedObjectCache new];
     [RKHuman truncateAll];
     RKManagedObjectMapping* mapping = [RKManagedObjectMapping mappingForClass:[RKHuman class] inManagedObjectStore:store];
     mapping.primaryKeyAttribute = @"name";
@@ -320,7 +320,7 @@
 - (void)testThatCreationOfNewObjectWithIncorrectTypeValueForPrimaryKeyAddsToCache
 {
     RKManagedObjectStore* store = [RKTestFactory managedObjectStore];
-    store.cacheStrategy = [RKInMemoryManagedObjectCache new];
+    store.cacheStrategy = [RKFetchRequestManagedObjectCache new];
     [RKHuman truncateAll];
     RKManagedObjectMapping* mapping = [RKManagedObjectMapping mappingForClass:[RKHuman class] inManagedObjectStore:store];
     mapping.primaryKeyAttribute = @"railsID";
