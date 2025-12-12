@@ -167,7 +167,16 @@
     }
 
     // If we have found the primary key attribute & value, try to find an existing instance to update
-    NSManagedObjectContext *bgContext = [self.objectStore backgroundManagedObjectContext];
+    // Use the thread-local mapping context if available (set by RKObjectLoader during mapping)
+    // This ensures all objects in a mapping operation are in the same context
+    NSManagedObjectContext *bgContext = [RKManagedObjectStore currentMappingContext];
+    if (bgContext == nil) {
+        // Fallback to backgroundManagedObjectContext for backward compatibility.
+        // This path should rarely be hit - log a warning to identify legacy code paths.
+        RKLogWarning(@"No currentMappingContext set - falling back to backgroundManagedObjectContext. "
+                     @"Consider updating caller to use RKObjectLoader which sets the mapping context.");
+        bgContext = [self.objectStore backgroundManagedObjectContext];
+    }
     if (primaryKeyAttribute && primaryKeyValue && NO == [primaryKeyValue isEqual:[NSNull null]]) {
         [bgContext performBlockAndWait:^{
             // Retain the object inside the block to ensure it survives beyond the block.

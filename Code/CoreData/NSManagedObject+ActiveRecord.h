@@ -16,7 +16,6 @@
 @interface NSManagedObjectContext (ActiveRecord)
 
 + (NSManagedObjectContext *)contextForMainThread;
-+ (NSManagedObjectContext *)contextForBackgroundThread;
 
 @end
 

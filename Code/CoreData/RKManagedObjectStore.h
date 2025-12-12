@@ -153,4 +153,22 @@ extern NSString* const RKManagedObjectStoreDidFailSaveNotification;
  */
 - (NSManagedObjectContext *)newBackgroundContext;
 
+///-----------------------------------------------------------------------------
+/// @name Thread-Local Mapping Context
+///-----------------------------------------------------------------------------
+
+/**
+ Sets the current mapping context for the calling thread.
+ This is used to pass the mapping context through the object mapping chain
+ without modifying method signatures. The context is NOT retained (assign).
+ Call with nil to clear the context when mapping is complete.
+ */
++ (void)setCurrentMappingContext:(NSManagedObjectContext *)context;
+
+/**
+ Returns the current mapping context for the calling thread, or nil if none is set.
+ Used by RKManagedObjectMapping to create/find objects in the correct context.
+ */
++ (NSManagedObjectContext *)currentMappingContext;
+
 @end

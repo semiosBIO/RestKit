@@ -31,11 +31,6 @@ RK_FIX_CATEGORY_BUG(NSManagedObjectContext_ActiveRecord)
     return [[RKManagedObjectStore defaultObjectStore] primaryManagedObjectContext];
 }
 
-+ (NSManagedObjectContext *)contextForBackgroundThread {
-    NSAssert([RKManagedObjectStore defaultObjectStore], @"[RKManagedObjectStore defaultObjectStore] cannot be nil");
-    return [[RKManagedObjectStore defaultObjectStore] backgroundManagedObjectContext];
-}
-
 @end
 
 RK_FIX_CATEGORY_BUG(NSManagedObject_ActiveRecord)

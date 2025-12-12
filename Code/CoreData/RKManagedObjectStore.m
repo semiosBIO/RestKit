@@ -37,6 +37,7 @@
 NSString* const RKManagedObjectStoreDidFailSaveNotification = @"RKManagedObjectStoreDidFailSaveNotification";
 static NSString* const RKManagedObjectStoreThreadDictionaryContextKey = @"RKManagedObjectStoreThreadDictionaryContextKey";
 static NSString* const RKManagedObjectStoreThreadDictionaryEntityCacheKey = @"RKManagedObjectStoreThreadDictionaryEntityCacheKey";
+static NSString* const RKManagedObjectStoreThreadDictionaryMappingContextKey = @"RKManagedObjectStoreThreadDictionaryMappingContextKey";
 
 static RKManagedObjectStore *defaultObjectStore = nil;
 
@@ -325,6 +326,25 @@ static RKManagedObjectStore *defaultObjectStore = nil;
     context.persistentStoreCoordinator = self.persistentContainer.persistentStoreCoordinator;
     context.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy;
     return context;  // Caller owns - must release (MRC)
+}
+
+#pragma mark - Thread-Local Mapping Context
+
++ (void)setCurrentMappingContext:(NSManagedObjectContext *)context {
+    NSMutableDictionary *threadDict = [[NSThread currentThread] threadDictionary];
+    if (context) {
+        // Store as NSValue to avoid retain under MRC (assign semantics)
+        [threadDict setObject:[NSValue valueWithNonretainedObject:context]
+                       forKey:RKManagedObjectStoreThreadDictionaryMappingContextKey];
+    } else {
+        [threadDict removeObjectForKey:RKManagedObjectStoreThreadDictionaryMappingContextKey];
+    }
+}
+
++ (NSManagedObjectContext *)currentMappingContext {
+    NSMutableDictionary *threadDict = [[NSThread currentThread] threadDictionary];
+    NSValue *value = [threadDict objectForKey:RKManagedObjectStoreThreadDictionaryMappingContextKey];
+    return value ? [value nonretainedObjectValue] : nil;
 }
 
 @end

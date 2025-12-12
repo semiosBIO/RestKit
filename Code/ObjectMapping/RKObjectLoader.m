@@ -288,6 +288,9 @@
     [_mappingContext performBlock:^{
         NSAutoreleasePool* pool = [[NSAutoreleasePool alloc] init];
 
+        // Set thread-local mapping context so RKManagedObjectMapping can use it
+        [RKManagedObjectStore setCurrentMappingContext:_mappingContext];
+
         RKLogDebug(@"Beginning object mapping activities within GCD queue labeled: %@", _mappingContext);
         NSError *error = nil;
         _result = [[self performMapping:&error] retain];
@@ -297,6 +300,9 @@
         } else if (error) {
             [self performSelectorOnMainThread:@selector(didFailLoadWithError:) withObject:error waitUntilDone:NO];
         }
+
+        // Clear thread-local mapping context
+        [RKManagedObjectStore setCurrentMappingContext:nil];
 
         [pool drain];
     }];
