@@ -294,14 +294,14 @@ static RKManagedObjectStore *defaultObjectStore = nil;
 - (void)createPersistentContainerWithName:(NSString*)name model:(NSManagedObjectModel*)model {
     NSAssert(_managedObjectModel, @"Cannot create persistent container without a managed object model");
     NSAssert(!_persistentContainer, @"Cannot create persistent container: one already exists.");
-    
+
     _persistentContainer = [[NSPersistentContainer alloc] initWithName:name managedObjectModel:self.managedObjectModel];
-    
+
     NSPersistentStoreDescription *storeDescription = self.persistentContainer.persistentStoreDescriptions.firstObject;
     storeDescription.URL = [NSURL fileURLWithPath:self.pathToStoreFile];
     storeDescription.shouldMigrateStoreAutomatically = YES;
     storeDescription.shouldInferMappingModelAutomatically = YES;
-    
+
     [self.persistentContainer loadPersistentStoresWithCompletionHandler:
      ^(NSPersistentStoreDescription *desc, NSError *error) {
         NSAssert(!error, @"Failed to load store: %@", error);
@@ -318,12 +318,15 @@ static RKManagedObjectStore *defaultObjectStore = nil;
         // Enable auto-merge so background context sees changes from sibling contexts via parent
         bgContext.automaticallyMergesChangesFromParent = YES;
         self.backgroundManagedObjectContext = [bgContext autorelease];
+
     }];
 }
 
 - (NSManagedObjectContext *)newBackgroundContext {
-    NSManagedObjectContext *context = [[NSManagedObjectContext alloc] initWithConcurrencyType:NSPrivateQueueConcurrencyType];
-    context.persistentStoreCoordinator = self.persistentContainer.persistentStoreCoordinator;
+    // Use NSPersistentContainer's newBackgroundContext which properly integrates with
+    // automaticallyMergesChangesFromParent on the viewContext. This ensures the main
+    // context automatically sees changes saved by background contexts without corruption.
+    NSManagedObjectContext *context = [self.persistentContainer newBackgroundContext];
     context.mergePolicy = NSMergeByPropertyStoreTrumpMergePolicy;
     return context;  // Caller owns - must release (MRC)
 }
