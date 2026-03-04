@@ -118,8 +118,11 @@
     for (NSManagedObjectID *objectID in objectIDs) {
         NSError *error = nil;
         NSManagedObject *object = [self.managedObjectContext existingObjectWithID:objectID error:&error];
-        if (! object && error) {
-            RKLogError(@"Failed to retrieve managed object with ID %@: %@", objectID, error);
+        if (! object) {
+            if (error) {
+                RKLogError(@"Failed to retrieve managed object with ID %@: %@", objectID, error);
+            }
+            continue;
         }
 
         [self addObject:object];
