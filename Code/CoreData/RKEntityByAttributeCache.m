@@ -102,30 +102,55 @@
 - (void)load
 {
     RKLogDebug(@"Loading entity cache for Entity '%@' by attribute '%@'", self.entity.name, self.attribute);
+
+    NSAttributeDescription *attributeDescription = [[self.entity attributesByName] objectForKey:self.attribute];
+    if (! attributeDescription) {
+        RKLogError(@"Failed to load entity cache: attribute '%@' not found on entity '%@'", self.attribute, self.entity.name);
+        return;
+    }
+
+    // Fetch objectID + primary key attribute together as a dictionary, so we don't
+    // have to fire a fault for every object in the entity. Doing per-object fault
+    // fires here is both wasteful and exposes a Core Data race on the SQLQueue
+    // (CFEqual/CFRelease in _prepareResultsFromResultSet) when sync mutates rows
+    // concurrently with cache load.
+    NSExpressionDescription *objectIDDescription = [[NSExpressionDescription alloc] init];
+    [objectIDDescription setName:@"objectID"];
+    [objectIDDescription setExpression:[NSExpression expressionForEvaluatedObject]];
+    [objectIDDescription setExpressionResultType:NSObjectIDAttributeType];
+
     NSFetchRequest *fetchRequest = [[NSFetchRequest alloc] init];
     [fetchRequest setEntity:self.entity];
-    [fetchRequest setResultType:NSManagedObjectIDResultType];
+    [fetchRequest setResultType:NSDictionaryResultType];
+    [fetchRequest setPropertiesToFetch:[NSArray arrayWithObjects:objectIDDescription, attributeDescription, nil]];
+    [objectIDDescription release];
 
     NSError *error = nil;
-    NSArray *objectIDs = [self.managedObjectContext executeFetchRequest:fetchRequest error:&error];
+    NSArray *results = [self.managedObjectContext executeFetchRequest:fetchRequest error:&error];
     [fetchRequest release];
     if (error) {
         RKLogError(@"Failed to load entity cache: %@", error);
         return;
     }
 
-    self.attributeValuesToObjectIDs = [NSMutableDictionary dictionaryWithCapacity:[objectIDs count]];
-    for (NSManagedObjectID *objectID in objectIDs) {
-        NSError *error = nil;
-        NSManagedObject *object = [self.managedObjectContext existingObjectWithID:objectID error:&error];
-        if (! object) {
-            if (error) {
-                RKLogError(@"Failed to retrieve managed object with ID %@: %@", objectID, error);
-            }
-            continue;
-        }
+    self.attributeValuesToObjectIDs = [NSMutableDictionary dictionaryWithCapacity:[results count]];
+    for (NSDictionary *result in results) {
+        NSManagedObjectID *objectID = [result objectForKey:@"objectID"];
+        id attributeValue = [result objectForKey:self.attribute];
+        if (! objectID) continue;
+        if (! attributeValue || attributeValue == [NSNull null]) continue;
 
-        [self addObject:object];
+        attributeValue = [self shouldCoerceAttributeToString:attributeValue] ? [attributeValue stringValue] : attributeValue;
+
+        NSMutableArray *objectIDs = [self.attributeValuesToObjectIDs objectForKey:attributeValue];
+        if (objectIDs) {
+            if (! [objectIDs containsObject:objectID]) {
+                [objectIDs addObject:objectID];
+            }
+        } else {
+            objectIDs = [NSMutableArray arrayWithObject:objectID];
+            [self.attributeValuesToObjectIDs setObject:objectIDs forKey:attributeValue];
+        }
     }
 }
 
